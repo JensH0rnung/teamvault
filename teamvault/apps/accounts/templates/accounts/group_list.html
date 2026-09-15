@@ -36,7 +36,7 @@
                                     <a href="{% url 'accounts.group-detail' groupname=group.name %}">{{ group.name }}</a>
                                 </td>
                                 <td>
-                                    <span>{{ group.user_set.count }}</span>
+                                    <span>{{ group.member_count }}</span>
                                 </td>
                             </tr>
                         {% endfor %}
