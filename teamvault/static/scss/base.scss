@@ -35,8 +35,11 @@ a {
   color: var(--bs-info);
 }
 
-.breadcrumb-link:hover {
-  text-decoration: underline;
+.hover-underline {
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
 }
 
 .background {
