@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Count, Max, Q
 from django.http import (
     HttpResponse,
     HttpResponseRedirect,
@@ -322,7 +322,7 @@ class GroupList(PageSizeMixin, ListView):
     template_name = 'accounts/group_list.html'
 
     def get_queryset(self):
-        return self.model.objects.order_by('name')
+        return self.model.objects.annotate(member_count=Count('user')).order_by('name')
 
 
 groups = user_passes_test(lambda u: u.is_superuser)(GroupList.as_view())
@@ -381,7 +381,7 @@ class GroupMemberList(PageSizeMixin, ListView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = self.group_object.user_set.order_by('username')
+        qs = self.group_object.user_set.select_related('profile').order_by('username')
         query = self.request.GET.get('q', '').strip()
         if query:
             return qs.filter(username__icontains=query)
@@ -414,9 +414,12 @@ class GroupSecretList(PageSizeMixin, ListView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = self.group_object.secret_share_data.filter(
-            Q(granted_until__isnull=True) | Q(granted_until__gt=now())
-        ).order_by('secret__name')
+        qs = (
+            self.group_object.secret_share_data
+            .filter(Q(granted_until__isnull=True) | Q(granted_until__gt=now()))
+            .select_related('secret', 'granted_by')
+            .order_by('secret__name')
+        )
         query = self.request.GET.get('q', '').strip()
         if query:
             return qs.filter(secret__name__icontains=query)
