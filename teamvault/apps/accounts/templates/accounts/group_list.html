@@ -28,6 +28,7 @@
                         <tr>
                             <th>{% trans "Groupname" %}</th>
                             <th>{% trans "Membercount" %}</th>
+                            <th>{% trans "Secrets shared" %}</th>
                         </tr>
                         {% for group in groups %}
                             <tr>
@@ -35,7 +36,10 @@
                                     <a href="{% url 'accounts.group-detail' groupname=group.name %}">{{ group.name }}</a>
                                 </td>
                                 <td>
-                                    <span>{{ group.user_set.count }}</span>
+                                    <span>{{ group.member_count }}</span>
+                                </td>
+                                <td>
+                                    <span>{{ group.secret_count }}</span>
                                 </td>
                             </tr>
                         {% endfor %}
