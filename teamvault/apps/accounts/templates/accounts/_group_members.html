@@ -37,5 +37,5 @@
 </table>
 <div hx-target="#group-members-wrapper" hx-push-url="false">
     {% url 'accounts.group-members' group.name as members_url %}
-    {% include "pagination.html" with url=members_url target="#group-members-wrapper" %}
+    {% include "_pagination.html" with url=members_url target="#group-members-wrapper" %}
 </div>

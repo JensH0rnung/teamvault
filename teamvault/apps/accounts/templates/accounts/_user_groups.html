@@ -14,5 +14,5 @@
 </div>
 <div hx-target="#user-groups-wrapper" hx-push-url="false">
     {% url 'accounts.user-groups' user.username as user_groups_url %}
-    {% include "pagination.html" with url=user_groups_url target="#user-groups-wrapper" %}
+    {% include "_pagination.html" with url=user_groups_url target="#user-groups-wrapper" %}
 </div>
