@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import sha256
 from json import JSONDecodeError, dumps, loads
-from operator import itemgetter
 
 from cryptography.fernet import Fernet
 from django.conf import settings
@@ -13,7 +12,7 @@ from django.contrib.auth.models import Group
 from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
-from django.db.models import BooleanField, Case, Max, Q, Value, When
+from django.db.models import BooleanField, Case, Max, Q, QuerySet, Value, When
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.http import Http404
@@ -25,6 +24,7 @@ from pyotp import TOTP
 
 from teamvault.apps.secrets.enums import AccessPolicy, ContentType, SecretStatus
 from .exceptions import PermissionError
+from .validators import get_otp_params_from_payload, otp_digest
 from ..audit.auditlog import log
 from ..audit.models import AuditLogCategoryChoices, LogEntry
 
@@ -121,7 +121,7 @@ class Secret(HashIDModel):
     HASHID_NAMESPACE = 'Secret'
 
     if t.TYPE_CHECKING:
-        from django.db.models.manager import RelatedManager
+        from django.db.models.fields.related_descriptors import RelatedManager
 
         # Django reverse relation from SharedSecretData.secret (related_name="share_data").
         share_data: 'RelatedManager[SharedSecretData]'
@@ -278,18 +278,15 @@ class Secret(HashIDModel):
         return plaintext_data
 
     def get_otp(self, request):
-        cached_otp_session_key = f'otp_key_data-{self.hashid}-{self.current_revision_id}'
-        if request.session.get(cached_otp_session_key):
-            data = request.session[cached_otp_session_key]
+        # only log the OTP access *once*
+        audited_session_key = f'otp-audited-{self.hashid}-{self.current_revision_id}'
+        if request.session.get(audited_session_key):
+            data = self.current_revision.peek_data(request.user)
         else:
             data = self.get_data(request.user)
-            request.session[cached_otp_session_key] = {
-                'otp_key': data['otp_key'],
-                'digits': int(data.get('digits', 6)),
-            }
-        otp_key = data['otp_key']
-        digits = int(data.get('digits', 6))
-        totp = TOTP(otp_key, digits=digits)
+            request.session[audited_session_key] = True
+        params = get_otp_params_from_payload(data)
+        totp = TOTP(params.otp_key, digits=params.digits, digest=otp_digest(params.algorithm))
         return totp.now()
 
     @classmethod
@@ -303,6 +300,15 @@ class Secret(HashIDModel):
             .filter(Q(access_policy=AccessPolicy.ANY) | Q(pk__in=allowed_shares))
             .exclude(status=SecretStatus.DELETED)
             .distinct()
+        )
+
+    @classmethod
+    def get_readable_ids_in_queryset(cls, user, secrets: QuerySet['Secret'] | list['Secret']):
+        return set(
+            cls
+            .get_all_readable_by_user(user)
+            .filter(pk__in=[secret.pk for secret in secrets])
+            .values_list('pk', flat=True)
         )
 
     @classmethod
@@ -339,14 +345,17 @@ class Secret(HashIDModel):
                 secret__isnull=False,
                 time__gte=since,
             )
-            .order_by('secret')
             .values('secret')
             .annotate(
                 access_count=models.Count('secret'),
             )
+            .order_by('-access_count', 'secret')[:limit]
         )
-        ordered_secrets = sorted(accessed_secrets, key=itemgetter('access_count'), reverse=True)
-        return [cls.objects.get(id=item['secret']) for item in ordered_secrets[:limit]]
+
+        ordered_secret_ids = [access['secret'] for access in accessed_secrets]
+        unordered_secrets = cls.objects.filter(id__in=ordered_secret_ids)
+        secret_map = {secret.id: secret for secret in unordered_secrets}
+        return [secret_map[secret_id] for secret_id in ordered_secret_ids if secret_id in secret_map]
 
     @classmethod
     def get_most_recently_used_for_user(cls, user, limit=5):
